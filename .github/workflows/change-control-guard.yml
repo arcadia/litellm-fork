@@ -1,0 +1,33 @@
+name: Change Control Guard
+# Arcadia SRE / HITRUST change control (AIFM-847)
+# https://arcadia-io.atlassian.net/wiki/spaces/AIFM/pages/1830977769
+#
+# Whether this is a REQUIRED status check is SRE's call via branch
+# protection; this workflow only defines the gate.
+on:
+  pull_request:
+    branches: [litellm_internal_staging, main]
+    types: [opened, edited, synchronize, reopened]
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Branch is not the integration branch
+        if: github.head_ref == 'litellm_internal_staging' || github.head_ref == 'main' || github.head_ref == 'master'
+        run: |
+          echo "::error::PR source branch is '${{ github.head_ref }}'. Changes must be made on a separate litellm_ branch and merged only after review."
+          exit 1
+      - name: PR references an AIFM or ACM ticket
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s\n%s' "$PR_TITLE" "$PR_BODY" | grep -Eiq '(AIFM|ACM)-[0-9]+'; then
+            echo "Tracking ticket reference found."
+          else
+            echo "::error::No AIFM-#### or ACM-#### reference in the PR title or body."
+            exit 1
+          fi

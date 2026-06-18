@@ -178,3 +178,13 @@ LiteLLM is a unified interface for 100+ LLM providers with two main components:
 1. **Create a Prisma migration** (permanent) — run `prisma migrate dev --name <description>` in the worktree. The generated file will be picked up by `prisma migrate deploy` on next startup.
 2. **Apply manually for local dev** — `psql -d litellm -c "ALTER TABLE ... ADD COLUMN IF NOT EXISTS ..."` after each proxy start. Fine for dev, not for production.
 3. **Update litellm-proxy-extras** — if the package is installed from PyPI, its migration directory must include the new file. Either update the package or run the migration manually until the next release ships it.
+
+## Change Control & SRE Rules
+
+This is the SRE-owned LiteLLM fork. It is solution-level code that feeds both the `dev-ai` and `prd-ai` gateways for ARIA, so every change goes through SRE/HITRUST change control. Full rules and the env-class matrix live in [`CONTRIBUTING-arcadia.md`](CONTRIBUTING-arcadia.md); canonical spec: [SRE / HITRUST Change Control for ARIA & AI Infrastructure](https://arcadia-io.atlassian.net/wiki/spaces/AIFM/pages/1830977769).
+
+- **Env class:** the fork is AIFM only (no ACM). A `prd-ai` (aria-arcadia-io) config promotion additionally needs an approved ACM Specialty Change Request (SCR) before promotion; an SRE ticket is required only for platform-wide changes (CCT chart / all consumers).
+- **Required tickets:** reference an `AIFM-####` ticket in the branch work, commit body, and PR title or body. Add an `ACM-####` SCR for `prd-ai` promotions. `change-control-guard.yml` fails PRs into `litellm_internal_staging` or `main` without an `AIFM`/`ACM` reference.
+- **Branch rule:** never commit to `main`; branch off `litellm_internal_staging` with a `litellm_`-prefixed, slash-free name.
+- **SRE reviewer:** `@arcadia/sre` owns the proxy, enterprise, and deploy paths via [`.github/CODEOWNERS`](.github/CODEOWNERS) and reviews or is notified before those ship.
+- **Non-negotiables:** no direct commits to `main`; approver != implementer; rollback plan before implementation; tested in `dev-ai` before `prd-ai`; timestamped audit-evidence screenshots.

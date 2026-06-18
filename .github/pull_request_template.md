@@ -56,3 +56,31 @@ If you're seeing a delay in your PR being merged, ping the LiteLLM Team on [Slac
 ✅ Test
 
 ## Changes
+
+<!-- Describe what changed. -->
+
+---
+
+## Arcadia change control (SRE / HITRUST)
+
+<!-- Required for this SRE-owned fork. Spec: https://arcadia-io.atlassian.net/wiki/spaces/AIFM/pages/1830977769 -->
+<!-- See CONTRIBUTING-arcadia.md for the env class and rules. -->
+
+**AIFM ticket:** <!-- AIFM-#### (required for every change) -->
+
+**ACM SCR:** <!-- ACM-#### required for prd-ai (aria-arcadia-io) promotions; write N/A otherwise -->
+
+**Environment touched** (select one):
+
+- [ ] solution-code (the fork itself; AIFM only, no ACM)
+- [ ] dev-ai (ai-development-arcadia-io; AIFM only, no ACM)
+- [ ] prd-ai (aria-arcadia-io; AIFM + approved ACM SCR before promotion)
+
+**Attestations:**
+
+- [ ] This PR is from a `litellm_` branch off `litellm_internal_staging`, not from `main`
+- [ ] The approver is not the implementer (peer review before merge)
+- [ ] A rollback plan exists and is written down before implementation
+- [ ] SRE has reviewed or been notified (required on proxy, enterprise, and deploy paths via CODEOWNERS)
+- [ ] Tested in `dev-ai` before any `prd-ai` promotion
+- [ ] Timestamped audit-evidence screenshots are attached or linked

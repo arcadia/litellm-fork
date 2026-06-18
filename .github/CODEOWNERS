@@ -1,0 +1,13 @@
+# Arcadia SRE change control (AIFM-847)
+# https://arcadia-io.atlassian.net/wiki/spaces/AIFM/pages/1830977769
+#
+# @arcadia/sre is a required reviewer on prod-sensitive paths of this
+# SRE-owned LiteLLM fork: the proxy gateway, enterprise code, and deploy
+# assets. These paths can affect the dev-ai and prd-ai gateways that feed
+# ARIA, so SRE reviews or is notified before they ship. Only paths that
+# currently exist in this branch are listed; add terraform/ or gateway/
+# owners here if those directories are introduced later.
+
+/litellm/proxy/   @arcadia/sre
+/enterprise/      @arcadia/sre
+/deploy/          @arcadia/sre
