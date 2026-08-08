@@ -1041,3 +1041,204 @@ async def test_executor_failure_is_not_tagged():
             )
 
     assert is_advisor_orchestration_failure(exc_info.value) is False
+
+
+# ---------------------------------------------------------------------------
+# `role: "system"` turns in the advisor sub-call
+# ---------------------------------------------------------------------------
+
+# A history carrying a leading system run *and* a mid-conversation reminder --
+# the two cases the placement rule treats differently.
+SYSTEM_HISTORY = [
+    {"role": "system", "content": [{"type": "text", "text": "You are terse."}]},
+    {"role": "user", "content": "read the file"},
+    {"role": "system", "content": "[Truncated: PARTIAL view of big1.txt]"},
+    {"role": "assistant", "content": "reading"},
+    {"role": "user", "content": "continue"},
+]
+
+# Not in the cost map, so the `claude-mid-conversation-system` generalization
+# rule supplies the capability. Every *mapped* first-party Anthropic id is
+# currently missing the flag (it is set on the bedrock/vertex/azure entries
+# only), so this is the one way to exercise the flagged branch on this leg.
+FLAGGED_ADVISOR_MODEL = "claude-newfamily-5"
+
+
+@pytest.fixture
+def local_model_cost_map(monkeypatch):
+    """Force the bundled cost map so the capability lookup doesn't depend on the
+    network-fetched copy."""
+    import litellm
+
+    original = litellm.model_cost
+    monkeypatch.setenv("LITELLM_LOCAL_MODEL_COST_MAP", "True")
+    litellm.model_cost = litellm.get_model_cost_map(url="")
+    litellm.get_model_info.cache_clear()
+    try:
+        yield
+    finally:
+        litellm.model_cost = original
+        litellm.get_model_info.cache_clear()
+
+
+async def _capture_advisor_subcall(history, advisor_model=ADVISOR_TOOL["model"]):
+    """Run one advisor turn over `history`; return the advisor sub-call kwargs."""
+    from litellm.llms.anthropic.experimental_pass_through.messages.interceptors.advisor import (
+        AdvisorOrchestrationHandler,
+    )
+
+    advisor_tool_use_resp = _make_advisor_tool_use_response(tool_id="toolu_01")
+    advisor_advice_resp = _make_text_response("advice", model=advisor_model)
+    final_resp = _make_text_response("final answer")
+
+    captured = {}
+    call_count = 0
+
+    async def mock_call(model, messages, tools, stream, max_tokens, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return advisor_tool_use_resp
+        if call_count == 2:
+            captured["messages"] = messages
+            captured["kwargs"] = kwargs
+            return advisor_advice_resp
+        return final_resp
+
+    with patch(
+        "litellm.llms.anthropic.experimental_pass_through.messages.interceptors.advisor._call_messages_handler",
+        side_effect=mock_call,
+    ):
+        await AdvisorOrchestrationHandler().handle(
+            model="openai/gpt-4o-mini",
+            messages=history,
+            tools=[{**ADVISOR_TOOL, "model": advisor_model}],
+            stream=False,
+            max_tokens=512,
+            custom_llm_provider="openai",
+        )
+    return captured
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_hoists_system_turns_for_a_model_without_the_flag(local_model_cost_map):
+    """The interceptor only fires for non-Anthropic executors while the advisor
+    model is typically an Anthropic one, so the sub-call lands on the first-party
+    ``/v1/messages`` path -- which forwards ``messages`` untouched. On a model
+    that does not accept ``role: "system"`` inside ``messages`` every entry must
+    reach the API in the top-level ``system`` field instead, or the sub-call 400s
+    with "role 'system' is not supported on this model"."""
+    captured = await _capture_advisor_subcall(SYSTEM_HISTORY)
+
+    assert not any(m.get("role") == "system" for m in captured["messages"])
+    assert captured["kwargs"]["system"] == [
+        {"type": "text", "text": "You are terse."},
+        {"type": "text", "text": "[Truncated: PARTIAL view of big1.txt]"},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_keeps_mid_conversation_system_in_place_when_flagged(local_model_cost_map):
+    """Prompt-cache non-regression. On a model flagged
+    ``supports_mid_conversation_system`` only the *leading* run is hoisted; a
+    mid-conversation entry keeps its position, because hoisting it would mutate
+    the top-level ``system`` prefix and invalidate the cache written for the
+    whole message history. An unconditional hoist here is the
+    mid-conversation-system cache-collapse signature."""
+    captured = await _capture_advisor_subcall(SYSTEM_HISTORY, advisor_model=FLAGGED_ADVISOR_MODEL)
+
+    assert captured["messages"][:3] == [
+        {"role": "user", "content": "read the file"},
+        {"role": "system", "content": "[Truncated: PARTIAL view of big1.txt]"},
+        {"role": "assistant", "content": "reading"},
+    ]
+    assert captured["kwargs"]["system"] == [{"type": "text", "text": "You are terse."}]
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_leaves_non_anthropic_advisor_models_untouched(local_model_cost_map):
+    """Bedrock Invoke, Vertex and Azure Foundry each call
+    ``_normalize_system_role_messages`` from their own transform, with their own
+    provider for the capability lookup. Normalizing again here could only hoist
+    an entry that provider would have kept in place, so the advisor leaves the
+    payload alone and lets that layer own it."""
+    captured = await _capture_advisor_subcall(
+        SYSTEM_HISTORY, advisor_model="bedrock/us.anthropic.claude-opus-4-8"
+    )
+
+    assert captured["messages"][: len(SYSTEM_HISTORY)] == SYSTEM_HISTORY
+    assert "system" not in captured["kwargs"]
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_preserves_cache_control_on_hoisted_blocks(local_model_cost_map):
+    """``cache_control`` must survive the move -- dropping it silently disables
+    prompt caching for the whole system prefix."""
+    block = {"type": "text", "text": "cached policy", "cache_control": {"type": "ephemeral"}}
+    captured = await _capture_advisor_subcall(
+        [{"role": "system", "content": [block]}, {"role": "user", "content": "go"}]
+    )
+
+    assert captured["kwargs"]["system"] == [block]
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_does_not_stringify_non_text_system_blocks(local_model_cost_map):
+    """A non-text block stays a block. Flattening the content to a string would
+    inline the payload (an image becomes ~1.4x its bytes as base64 text) and drop
+    its type."""
+    image_block = {
+        "type": "image",
+        "source": {"type": "base64", "media_type": "image/png", "data": "iVBORw0KGgo="},
+    }
+    captured = await _capture_advisor_subcall(
+        [
+            {"role": "system", "content": [image_block, {"type": "text", "text": "tail"}]},
+            {"role": "user", "content": "go"},
+        ]
+    )
+
+    assert captured["kwargs"]["system"] == [image_block, {"type": "text", "text": "tail"}]
+
+
+@pytest.mark.asyncio
+async def test_advisor_sub_call_omits_system_when_history_has_none(local_model_cost_map):
+    """No system turns -> no ``system`` param invented. An empty list is a real
+    prefix on the first-party path, not an absent one."""
+    captured = await _capture_advisor_subcall(
+        [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "yo"}]
+    )
+
+    assert "system" not in captured["kwargs"]
+    assert not any(m.get("role") == "system" for m in captured["messages"])
+
+
+@pytest.mark.parametrize("advisor_model", [ADVISOR_TOOL["model"], FLAGGED_ADVISOR_MODEL])
+def test_advisor_system_placement_matches_the_shared_normalizer(local_model_cost_map, advisor_model):
+    """Proof, not assertion: the advisor must not restate the placement rule.
+    Run the *real* shared normalizer over the same payload and require the
+    advisor helper to agree, on both sides of the capability flag."""
+    from litellm.llms.anthropic.experimental_pass_through.messages.interceptors.advisor import (
+        _normalize_advisor_system_turns,
+    )
+    from litellm.llms.anthropic.experimental_pass_through.messages.transformation import (
+        AnthropicMessagesConfig,
+    )
+
+    expected = {"messages": [dict(m) for m in SYSTEM_HISTORY]}
+    AnthropicMessagesConfig()._normalize_system_role_messages(expected, model=advisor_model)
+
+    messages, system = _normalize_advisor_system_turns([dict(m) for m in SYSTEM_HISTORY], advisor_model)
+
+    assert messages == expected["messages"]
+    assert system == expected.get("system")
+
+
+def test_the_shared_normalizer_the_advisor_delegates_to_still_exists():
+    """The proof above is only meaningful while this method exists. If it is
+    renamed, fail loudly here rather than let the proof pass against a no-op."""
+    from litellm.llms.anthropic.experimental_pass_through.messages.transformation import (
+        AnthropicMessagesConfig,
+    )
+
+    assert callable(getattr(AnthropicMessagesConfig, "_normalize_system_role_messages", None))

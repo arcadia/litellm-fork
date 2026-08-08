@@ -138,6 +138,7 @@ class AdvisorOrchestrationHandler(MessagesInterceptor):
 
             # --- Advisor sub-call (always non-streaming, no tools) ---
             try:
+                advisor_messages, advisor_system = _normalize_advisor_system_turns(advisor_messages, advisor_model)
                 advisor_response: AnthropicMessagesResponse = await _call_messages_handler(
                     model=advisor_model,
                     messages=advisor_messages,
@@ -152,6 +153,7 @@ class AdvisorOrchestrationHandler(MessagesInterceptor):
                     },
                     api_key=advisor_api_key,
                     api_base=advisor_api_base,
+                    **({"system": advisor_system} if advisor_system else {}),
                 )
             except Exception as advisor_sub_call_exception:
                 mark_advisor_orchestration_failure(advisor_sub_call_exception)
@@ -300,6 +302,53 @@ def _build_advisor_context(
         result.append({"role": "assistant", "content": executor_text_blocks})
     result.append({"role": "user", "content": question})
     return result
+
+
+def _normalize_advisor_system_turns(messages: list[dict], advisor_model: str) -> tuple[list[dict], Any | None]:
+    """
+    Apply the shared ``role: "system"`` placement rule to the advisor sub-call.
+
+    ``_build_advisor_context`` synthesises a *new* message array — the caller's
+    history plus the advisor question as a trailing user turn — and sends it to
+    the advisor model. The interceptor only fires for non-Anthropic executors
+    while the advisor model is typically an Anthropic one, so that sub-call
+    routinely lands on the first-party ``/v1/messages`` path, the one leg whose
+    ``transform_anthropic_messages_request`` forwards ``messages`` untouched.
+    Bedrock Invoke, Vertex and Azure Foundry each call
+    ``_normalize_system_role_messages`` from their own transform, so a
+    ``role: "system"`` entry in the caller's history is already handled there;
+    on the first-party leg it reaches the API as-is and 400s on any model that
+    does not accept the role in that position.
+
+    Delegates to that same normalizer rather than restating the rule, so the
+    model-aware policy lives in one place: a leading run is hoisted into the
+    top-level ``system`` field (rejected on every model), while a
+    mid-conversation entry is left where it is on models flagged
+    ``supports_mid_conversation_system`` — hoisting one there would mutate the
+    ``system`` prefix and collapse the prompt cache for the whole history. No
+    *mapped* first-party Anthropic cost-map entry carries that flag today (it is
+    set on the Bedrock, Vertex and Azure entries), so on this leg every system
+    entry is currently hoisted; because the rule is read from the cost map
+    rather than restated here, that corrects itself when the flag lands.
+
+    Returns the messages to send and the top-level ``system`` value, or ``None``
+    when nothing was hoisted (an empty ``system`` is a real prefix, not an
+    absent one, so it must never be invented).
+    """
+    from litellm.llms.anthropic.experimental_pass_through.messages.transformation import (
+        AnthropicMessagesConfig,
+    )
+
+    _, advisor_provider, _, _ = litellm.get_llm_provider(model=advisor_model)
+    if advisor_provider != litellm.LlmProviders.ANTHROPIC.value:
+        # Every other provider normalizes in its own transform, with its own
+        # provider for the capability lookup. Doing it again here would only
+        # risk hoisting an entry that provider would have kept in place.
+        return messages, None
+
+    request: Final[dict] = {"messages": messages}
+    AnthropicMessagesConfig()._normalize_system_role_messages(request, model=advisor_model)
+    return request["messages"], request.get("system")
 
 
 def _inject_advisor_turn(
