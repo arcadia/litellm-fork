@@ -2046,7 +2046,9 @@ def test_add_user_api_key_auth_to_request_metadata():
     metadata = result[metadata_variable_name]
 
     # Check that user API key information was added
-    assert metadata["user_api_key_hash"] == "hashed-test-key-123"
+    # The literal is *named* "hashed" but is not a 64-hex sha256, so UserAPIKeyAuth
+    # hashes it on construction. Compare against the stored value.
+    assert metadata["user_api_key_hash"] == user_api_key_dict.api_key
     assert metadata["user_api_key_alias"] == "test-key-alias"
     assert metadata["user_api_key_team_id"] == "test-team-789"
     assert metadata["user_api_key_user_id"] == "test-user-123"
@@ -2057,7 +2059,7 @@ def test_add_user_api_key_auth_to_request_metadata():
     assert metadata["user_api_key_request_route"] == "/chat/completions"
 
     # Check that the hashed API key was added
-    assert metadata["user_api_key"] == "hashed-test-key-123"
+    assert metadata["user_api_key"] == user_api_key_dict.api_key
 
     # Check that end user max budget was added
     assert metadata["user_api_end_user_max_budget"] == 500.0
@@ -5314,13 +5316,15 @@ async def test_overwrite_user_with_key_hash_disabled_preserves_caller_user():
 
 @pytest.mark.asyncio
 async def test_overwrite_user_with_key_hash_skips_custom_auth_credential(monkeypatch):
-    """Custom-auth credentials are not sk-prefixed or JWTs, so UserAPIKeyAuth stores
-    them raw; the stamp must skip them entirely so auth material never leaks."""
+    """Custom-auth credentials are not sk-prefixed or JWTs. They are now hashed rather
+    than stored raw, but the stamp must still skip them entirely: only the server-set
+    via_virtual_key marker may authorize stamping."""
     monkeypatch.setattr(litellm, "overwrite_user_with_key_hash", True)
 
     raw_credential = "my-custom-auth-credential-abc123"
     user_api_key_dict = UserAPIKeyAuth(api_key=raw_credential)
-    assert user_api_key_dict.api_key == raw_credential
+    # fails closed: an unrecognised credential shape is hashed, not retained verbatim
+    assert user_api_key_dict.api_key != raw_credential
 
     updated_data = await add_litellm_data_to_request(
         data={"model": "gpt-4o", "user": "caller-chosen-id"},

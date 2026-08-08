@@ -18,6 +18,7 @@ from typing_extensions import NotRequired, Required, TypedDict
 
 from litellm._uuid import uuid
 from litellm.constants import MCP_STDIO_ALLOWED_COMMANDS
+from litellm.litellm_core_utils.credential_hashing import hash_credential_fail_closed
 from litellm.litellm_core_utils.initialize_dynamic_callback_params import (
     validate_no_callback_env_reference,
 )
@@ -2705,17 +2706,17 @@ class UserAPIKeyAuth(LiteLLM_VerificationTokenView):  # the expected response ob
         Covers:
         1. Regular API keys from LiteLLM DB
         2. JWT tokens used for connecting to LiteLLM API
-        """
-        normalized = api_key
-        if normalized[:7].lower() == "bearer ":
-            normalized = normalized[7:]
-        if normalized.startswith("sk-"):
-            return hash_token(normalized)
-        from litellm.proxy.auth.handle_jwt import JWTHandler
+        3. Anything else - an unrecognised credential shape is hashed rather than
+           returned in cleartext. This used to `return normalized`, which shared a
+           single shape heuristic with `_hash_api_key_for_spend_log`, so a credential
+           outside {sk-*, dotted JWT} defeated both controls at once.
 
-        if JWTHandler.is_jwt(token=normalized):
-            return f"hashed-jwt-{hash_token(token=normalized)}"
-        return normalized
+        Output is unchanged for every shape that was already recognised. Already-hashed
+        values pass through untouched: `check_api_key` is a `mode="before"` validator, so
+        it re-runs each time a `UserAPIKeyAuth` is rebuilt from a dict of already-hashed
+        values, and re-hashing here would double-hash on every reconstruction.
+        """
+        return hash_credential_fail_closed(api_key)
 
     @classmethod
     def get_litellm_internal_health_check_user_api_key_auth(cls) -> "UserAPIKeyAuth":

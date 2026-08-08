@@ -3,6 +3,7 @@
 
 import asyncio
 import base64
+import hashlib
 import logging
 import os
 import random
@@ -1304,13 +1305,17 @@ def test_user_api_key_auth_jwt_hashing():
     assert not user_auth_regular.api_key.startswith("hashed-jwt-")
     assert not user_auth_regular.token.startswith("hashed-jwt-")
 
-    # Test with a non-JWT, non-sk string (should not be hashed)
+    # Test with a non-JWT, non-sk string. This used to be returned in cleartext, which
+    # meant an opaque credential (e.g. the OAuth2 bearer token that oauth2_check.py passes
+    # straight in as api_key) was persisted verbatim to the spend logs and log sinks.
+    # It is now hashed too - the shape heuristic fails closed.
     non_jwt_key = "some-random-key"
     user_auth_non_jwt = UserAPIKeyAuth(api_key=non_jwt_key)
 
-    # Verify that non-JWT key is not hashed
-    assert user_auth_non_jwt.api_key == non_jwt_key
-    assert user_auth_non_jwt.token == non_jwt_key
+    assert user_auth_non_jwt.api_key != non_jwt_key
+    assert user_auth_non_jwt.token != non_jwt_key
+    assert non_jwt_key not in user_auth_non_jwt.api_key
+    assert user_auth_non_jwt.api_key == hashlib.sha256(non_jwt_key.encode()).hexdigest()
 
 
 def test_jwt_handler_is_jwt_static_method():

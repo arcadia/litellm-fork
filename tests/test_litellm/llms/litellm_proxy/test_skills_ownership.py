@@ -145,7 +145,8 @@ def test_should_build_resource_owner_scopes_for_auth_context():
         "user:user-1",
         "team:team-1",
         "org:org-1",
-        "key:api-key-hash",
+        # hashed by UserAPIKeyAuth on construction
+        f"key:{auth.api_key}",
     ]
     assert resource_ownership.get_primary_resource_owner_scope(auth) == "user-1"
     assert resource_ownership.user_can_access_resource_owner("team:team-1", auth)

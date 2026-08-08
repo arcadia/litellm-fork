@@ -2272,7 +2272,9 @@ def test_update_internal_user_settings_writes_audit_log(mock_proxy_config, monke
     async def _admin_auth():
         return UserAPIKeyAuth(
             user_id="audit-admin",
-            api_key="hashed-admin-key",
+            # A real sha256: UserAPIKeyAuth hashes any credential that is not
+            # already hashed, so a placeholder would not survive construction.
+            api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             user_role=LitellmUserRoles.PROXY_ADMIN,
         )
 
@@ -2290,7 +2292,7 @@ def test_update_internal_user_settings_writes_audit_log(mock_proxy_config, monke
         assert written["action"] == "updated"
         assert written["table_name"] == "LiteLLM_Config"
         assert written["changed_by"] == "audit-admin"
-        assert written["changed_by_api_key"] == "hashed-admin-key"
+        assert written["changed_by_api_key"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
         before = json.loads(written["before_value"])
         after = json.loads(written["updated_values"])

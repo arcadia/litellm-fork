@@ -53,7 +53,10 @@ class TestSensitiveDataRoutingHandler:
 
     @pytest.mark.asyncio
     async def test_set_session_routing(self, handler):
-        key = UserAPIKeyAuth(api_key="hashed-key")
+        # A real sha256. UserAPIKeyAuth hashes any credential that is not already
+        # hashed, so a non-hash placeholder would not survive construction and the
+        # tenant/cache-key expectations below would no longer match.
+        key = UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         await handler.set_session_routing(
             session_id="test-session-123",
             model="on-premise-model",
@@ -408,8 +411,8 @@ class TestCacheKeyAndTTL:
     def test_make_cache_key_format(self):
         cache = MockInternalUsageCache()
         handler = _PROXY_SensitiveDataRoutingHandler(internal_usage_cache=cache)
-        key = handler._make_cache_key("test-session-123", "hashed-key")
-        assert key == "{sensitive_route:hashed-key:test-session-123}:model"
+        key = handler._make_cache_key("test-session-123", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        assert key == "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:test-session-123}:model"
 
     def test_make_cache_key_is_tenant_scoped(self):
         cache = MockInternalUsageCache()
@@ -420,9 +423,9 @@ class TestCacheKeyAndTTL:
 
     def test_resolve_tenant_prefers_api_key(self):
         tenant = _PROXY_SensitiveDataRoutingHandler._resolve_tenant(
-            UserAPIKeyAuth(api_key="hashed-key", user_id="alice")
+            UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", user_id="alice")
         )
-        assert tenant == "hashed-key"
+        assert tenant == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
     def test_resolve_tenant_falls_back_to_jwt_principal(self):
         tenant = _PROXY_SensitiveDataRoutingHandler._resolve_tenant(
@@ -548,7 +551,7 @@ class TestRedisCache:
             return_value="redis-model"
         )
         result = await handler_with_redis._get_routed_model(
-            "session-123", UserAPIKeyAuth(api_key="hashed-key")
+            "session-123", UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         )
         assert result == "redis-model"
 
@@ -556,8 +559,8 @@ class TestRedisCache:
     async def test_get_routed_model_backfills_in_memory_after_redis_hit(
         self, handler_with_redis
     ):
-        cache_key = "{sensitive_route:hashed-key:session-123}:model"
-        key = UserAPIKeyAuth(api_key="hashed-key")
+        cache_key = "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:session-123}:model"
+        key = UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         handler_with_redis.internal_usage_cache.dual_cache.redis_cache.async_get_cache = AsyncMock(
             return_value="on-premise-model"
         )
@@ -579,8 +582,8 @@ class TestRedisCache:
 
     @pytest.mark.asyncio
     async def test_backfill_uses_remaining_redis_ttl(self, handler_with_redis):
-        cache_key = "{sensitive_route:hashed-key:session-123}:model"
-        key = UserAPIKeyAuth(api_key="hashed-key")
+        cache_key = "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:session-123}:model"
+        key = UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         handler_with_redis.internal_usage_cache.dual_cache.redis_cache.async_get_cache = AsyncMock(
             return_value="on-premise-model"
         )
@@ -596,8 +599,8 @@ class TestRedisCache:
     async def test_backfill_falls_back_to_full_ttl_when_redis_ttl_missing(
         self, handler_with_redis
     ):
-        cache_key = "{sensitive_route:hashed-key:session-123}:model"
-        key = UserAPIKeyAuth(api_key="hashed-key")
+        cache_key = "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:session-123}:model"
+        key = UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         handler_with_redis.internal_usage_cache.dual_cache.redis_cache.async_get_cache = AsyncMock(
             return_value="on-premise-model"
         )
@@ -618,10 +621,10 @@ class TestRedisCache:
             side_effect=Exception("Redis connection error")
         )
         handler_with_redis.internal_usage_cache._cache[
-            "{sensitive_route:hashed-key:session-123}:model"
+            "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:session-123}:model"
         ] = "fallback-model"
         result = await handler_with_redis._get_routed_model(
-            "session-123", UserAPIKeyAuth(api_key="hashed-key")
+            "session-123", UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
         )
         assert result == "fallback-model"
 
@@ -633,7 +636,7 @@ class TestRedisCache:
         await handler_with_redis.set_session_routing(
             session_id="session-456",
             model="on-premise-model",
-            user_api_key_dict=UserAPIKeyAuth(api_key="hashed-key"),
+            user_api_key_dict=UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             guardrail_name="test-guardrail",
         )
         handler_with_redis.internal_usage_cache.dual_cache.redis_cache.async_set_cache.assert_called_once()
@@ -648,9 +651,9 @@ class TestRedisCache:
         await handler_with_redis.set_session_routing(
             session_id="session-789",
             model="on-premise-model",
-            user_api_key_dict=UserAPIKeyAuth(api_key="hashed-key"),
+            user_api_key_dict=UserAPIKeyAuth(api_key="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
         )
-        cache_key = "{sensitive_route:hashed-key:session-789}:model"
+        cache_key = "{sensitive_route:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:session-789}:model"
         assert (
             handler_with_redis.internal_usage_cache._cache[cache_key]
             == "on-premise-model"

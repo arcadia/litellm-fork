@@ -598,7 +598,8 @@ def test_foward_litellm_user_info_to_backend_llm_call():
     expected_data = {
         "x-litellm-user_api_key_user_id": "test_user_id",
         "x-litellm-user_api_key_org_id": "test_org_id",
-        "x-litellm-user_api_key_hash": "test_api_key",
+        # hashed by UserAPIKeyAuth on construction - compare against the stored value
+        "x-litellm-user_api_key_hash": user_api_key_dict.api_key,
         "x-litellm-user_api_key_spend": "0.0",
         "x-litellm-user_api_key_auth_metadata": "{}",
     }

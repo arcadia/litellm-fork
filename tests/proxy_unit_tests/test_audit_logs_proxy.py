@@ -165,7 +165,8 @@ async def test_create_internal_user_audit_log_uses_changed_by_helper():
 
     request_data = mock_create_audit_log_for_update.await_args.kwargs["request_data"]
     assert request_data.changed_by == "delegated-user"
-    assert request_data.changed_by_api_key == "test-key"
+    # hashed by UserAPIKeyAuth on construction - compare against the stored value
+    assert request_data.changed_by_api_key == user_api_key_dict.api_key
     assert request_data.object_id == "target-user"
     assert request_data.action == "updated"
 

@@ -839,7 +839,8 @@ async def test_async_post_call_failure_hook(prometheus_logger):
             end_user=None,
             user="test_user",
             user_email=None,
-            hashed_api_key="test_key",
+            # hashed by UserAPIKeyAuth on construction
+            hashed_api_key=user_api_key_dict.api_key,
             api_key_alias="test_alias",
             team="test_team",
             team_alias="test_team_alias",
@@ -864,7 +865,8 @@ async def test_async_post_call_failure_hook(prometheus_logger):
     # Assert total requests metric was incremented with correct labels
     prometheus_logger.litellm_proxy_total_requests_metric.labels.assert_called_once_with(
         end_user=None,
-        hashed_api_key="test_key",
+        # hashed by UserAPIKeyAuth on construction
+        hashed_api_key=user_api_key_dict.api_key,
         api_key_alias="test_alias",
         requested_model="gpt-5-mini",
         team="test_team",
@@ -1079,7 +1081,9 @@ async def test_log_success_fallback_event(prometheus_logger):
     kwargs = {
         "model": "gpt-5.5",
         "metadata": {
-            "user_api_key_hash": "test_hash",
+            # a real sha256: the logging metadata sanitizer hashes anything that is
+            # not already hashed, so a placeholder would not survive the round trip.
+            "user_api_key_hash": "a" * 64,
             "user_api_key_alias": "test_alias",
             "user_api_key_team_id": "test_team",
             "user_api_key_team_alias": "test_team_alias",
@@ -1098,7 +1102,7 @@ async def test_log_success_fallback_event(prometheus_logger):
     prometheus_logger.litellm_deployment_successful_fallbacks.labels.assert_called_once_with(
         requested_model=original_model_group,
         fallback_model="gpt-5.5",
-        hashed_api_key="test_hash",
+        hashed_api_key="a" * 64,
         api_key_alias="test_alias",
         team="test_team",
         team_alias="test_team_alias",
@@ -1117,7 +1121,9 @@ async def test_log_failure_fallback_event(prometheus_logger):
     kwargs = {
         "model": "gpt-5.5",
         "metadata": {
-            "user_api_key_hash": "test_hash",
+            # a real sha256: the logging metadata sanitizer hashes anything that is
+            # not already hashed, so a placeholder would not survive the round trip.
+            "user_api_key_hash": "a" * 64,
             "user_api_key_alias": "test_alias",
             "user_api_key_team_id": "test_team",
             "user_api_key_team_alias": "test_team_alias",
@@ -1136,7 +1142,7 @@ async def test_log_failure_fallback_event(prometheus_logger):
     prometheus_logger.litellm_deployment_failed_fallbacks.labels.assert_called_once_with(
         requested_model=original_model_group,
         fallback_model="gpt-5.5",
-        hashed_api_key="test_hash",
+        hashed_api_key="a" * 64,
         api_key_alias="test_alias",
         team="test_team",
         team_alias="test_team_alias",

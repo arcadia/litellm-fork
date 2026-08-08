@@ -186,8 +186,10 @@ def test_init_kwargs_for_pass_through_endpoint_basic(
     #########################################################
     # Check metadata
     #########################################################
-    assert result["litellm_params"]["metadata"]["user_api_key"] == "test-key"
-    assert result["litellm_params"]["metadata"]["user_api_key_hash"] == "test-key"
+    # `UserAPIKeyAuth` hashes the credential it is constructed with, so compare against
+    # the stored value rather than the raw fixture literal.
+    assert result["litellm_params"]["metadata"]["user_api_key"] == mock_user_api_key_dict.api_key
+    assert result["litellm_params"]["metadata"]["user_api_key_hash"] == mock_user_api_key_dict.api_key
     assert result["litellm_params"]["metadata"]["user_api_key_alias"] is None
     assert result["litellm_params"]["metadata"]["user_api_key_user_email"] is None
     assert result["litellm_params"]["metadata"]["user_api_key_user_id"] == "test-user"
@@ -237,7 +239,8 @@ def test_init_kwargs_with_litellm_metadata(mock_request, mock_user_api_key_dict)
     print("metadata", metadata)
     assert metadata["custom_field"] == "custom_value"
     assert metadata["tags"] == ["tag1", "tag2"]
-    assert metadata["user_api_key"] == "test-key"
+    # hashed by UserAPIKeyAuth on construction - compare against the stored value
+    assert metadata["user_api_key"] == mock_user_api_key_dict.api_key
 
 
 def test_init_kwargs_with_tags_in_header(mock_request, mock_user_api_key_dict):

@@ -2718,11 +2718,32 @@ class TestHashApiKeyForSpendLog:
         hashed = "bcfe8173f5447f10be0e7fb37aaa8b97829d5c9e0498232152f9d123456789ab"
         assert _hash_api_key_for_spend_log(hashed) == hashed
 
-    def test_bearer_prefixed_non_sk_key_strips_prefix(self):
+    def test_bearer_prefixed_non_sk_key_is_hashed(self):
+        """
+        Fail closed. An opaque non-`sk-` credential used to be returned in cleartext and
+        written straight to the SpendLogs `api_key` column; stripping the `Bearer ` prefix
+        is not enough, because the token itself is the secret.
+        """
+        import hashlib
+
         raw = "Bearer some-other-token-format"
         result = _hash_api_key_for_spend_log(raw)
-        assert result == "some-other-token-format"
+        assert "some-other-token-format" not in result
         assert not result.startswith("Bearer")
+        assert result == hashlib.sha256(b"some-other-token-format").hexdigest()
+
+    def test_non_credential_sentinel_stays_readable(self):
+        """
+        Service-account labels are substituted into `api_key` in place of a credential and
+        must stay readable, or the principal's spend rows split between a readable alias
+        and an opaque hash.
+        """
+        from litellm.constants import LITTELM_INTERNAL_HEALTH_SERVICE_ACCOUNT_NAME
+
+        assert (
+            _hash_api_key_for_spend_log(LITTELM_INTERNAL_HEALTH_SERVICE_ACCOUNT_NAME)
+            == LITTELM_INTERNAL_HEALTH_SERVICE_ACCOUNT_NAME
+        )
 
     def test_bearer_and_bare_produce_same_hash(self):
         bare = "sk-WLi4iRn4JmbVlTaYw12IOA"
