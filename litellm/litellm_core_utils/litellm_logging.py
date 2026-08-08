@@ -5,7 +5,6 @@ import copy
 import datetime
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -54,6 +53,10 @@ from litellm.integrations.deepeval.deepeval import DeepEvalLogger
 from litellm.integrations.mlflow import MlflowLogger
 from litellm.integrations.sqs import SQSLogger
 from litellm.litellm_core_utils.core_helpers import reconstruct_model_name
+from litellm.litellm_core_utils.credential_hashing import (
+    is_valid_sha256_hash,
+    sanitize_credential_for_logging,
+)
 from litellm.litellm_core_utils.get_litellm_params import get_litellm_params
 from litellm.litellm_core_utils.llm_cost_calc.tool_call_cost_tracking import (
     StandardBuiltInToolCostTracking,
@@ -4491,9 +4494,18 @@ def use_custom_pricing_for_model(litellm_params: dict | None) -> bool:
     return False
 
 
-def is_valid_sha256_hash(value: str) -> bool:
-    # Check if the value is a valid SHA-256 hash (64 hexadecimal characters)
-    return bool(re.fullmatch(r"[a-fA-F0-9]{64}", value))
+def _sanitize_user_api_key_hash(value: str | None) -> str | None:
+    """
+    Never persist a raw credential under `user_api_key_hash`.
+
+    Both callers below blind-copy `user_api_key_hash` out of caller-supplied metadata
+    before the `is_valid_sha256_hash` check runs, and that check is a *conditional
+    overwrite* rather than a filter - it cannot unset a cleartext value that was already
+    copied in. This is therefore the only gate on the field, and it fails closed: an
+    unrecognised credential shape is hashed instead of being handed to the logging sinks
+    (S3, GCS, a webhook, ...) verbatim. Already-hashed values pass through untouched.
+    """
+    return sanitize_credential_for_logging(value)
 
 
 class StandardLoggingPayloadSetup:
@@ -4678,6 +4690,8 @@ class StandardLoggingPayloadSetup:
             user_api_key: Final = metadata.get("user_api_key")
             if user_api_key and isinstance(user_api_key, str) and is_valid_sha256_hash(user_api_key):
                 clean_metadata["user_api_key_hash"] = user_api_key
+            # never persist a raw credential under user_api_key_hash
+            clean_metadata["user_api_key_hash"] = _sanitize_user_api_key_hash(clean_metadata.get("user_api_key_hash"))
             _potential_requester_metadata: Final = metadata.get(
                 "metadata", None
             )  # check if user passed metadata in the sdk request - e.g. metadata for langsmith logging - https://docs.litellm.ai/docs/observability/langsmith_integration#set-langsmith-fields
@@ -5518,6 +5532,8 @@ def get_standard_logging_metadata(
         if metadata.get("user_api_key") is not None:
             if is_valid_sha256_hash(str(metadata.get("user_api_key"))):
                 clean_metadata["user_api_key_hash"] = metadata.get("user_api_key")  # this is the hash
+        # never persist a raw credential under user_api_key_hash
+        clean_metadata["user_api_key_hash"] = _sanitize_user_api_key_hash(clean_metadata.get("user_api_key_hash"))
     return clean_metadata
 
 

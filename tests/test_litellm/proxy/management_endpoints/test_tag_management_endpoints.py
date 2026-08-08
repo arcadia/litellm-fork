@@ -477,8 +477,10 @@ async def test_internal_user_list_tags_only_returns_tags_used_by_their_keys():
             mock_db.litellm_dailytagspend.group_by.assert_awaited_once_with(
                 by=["tag"],
                 where={
+                    # `UserAPIKeyAuth` hashes the credential it is constructed with, so
+                    # compare against the stored value rather than the raw fixture.
                     "tag": {"not": None},
-                    "api_key": {"in": ["current-owned-key", "owned-key"]},
+                    "api_key": {"in": [mock_user_auth.api_key, "owned-key"]},
                 },
                 min={"created_at": True},
                 max={"updated_at": True},
@@ -711,9 +713,9 @@ async def test_internal_user_tag_daily_activity_scopes_to_current_key_without_us
         assert result == "daily-activity-response"
         assert fake_token_table.calls == []
         mock_get_daily_activity.assert_awaited_once()
-        assert mock_get_daily_activity.await_args.kwargs["api_key"] == [
-            "current-owned-key"
-        ]
+        # `UserAPIKeyAuth` hashes the credential it is constructed with, so compare
+        # against the stored value rather than the raw fixture.
+        assert mock_get_daily_activity.await_args.kwargs["api_key"] == [mock_user_auth.api_key]
 
 
 @pytest.mark.asyncio

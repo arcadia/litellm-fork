@@ -23,10 +23,11 @@ from litellm.litellm_core_utils.core_helpers import (
     get_litellm_metadata_from_kwargs,
     reconstruct_model_name,
 )
+from litellm.litellm_core_utils.credential_hashing import hash_credential_fail_closed
 from litellm.litellm_core_utils.safe_json_dumps import safe_dumps, strip_null_bytes
 from litellm.proxy._types import SpendLogsMetadata, SpendLogsPayload
 from litellm.proxy.spend_tracking.spend_log_error_logger import spend_log_error
-from litellm.proxy.utils import PrismaClient, hash_token
+from litellm.proxy.utils import PrismaClient
 from litellm.types.utils import (
     CostBreakdown,
     StandardLoggingGuardrailInformation,
@@ -55,10 +56,13 @@ def _get_max_string_length_prompt_in_db() -> int:
 
 
 def _hash_api_key_for_spend_log(api_key: str) -> str:
-    stripped: Final = api_key[7:] if api_key[:7].lower() == "bearer " else api_key
-    if stripped.startswith("sk-"):
-        return hash_token(stripped)
-    return stripped
+    """
+    Fail closed. An `sk-` key hashes exactly as it did before; any other shape - an opaque
+    bearer token, a JWT - is now hashed too, rather than being written to the SpendLogs
+    `api_key` column in cleartext. Already-hashed values, which is what this normally
+    receives, pass through byte for byte so spend rows keep joining to the same key.
+    """
+    return hash_credential_fail_closed(api_key)
 
 
 def _is_master_key(api_key: str | None, _master_key: str | None) -> bool:

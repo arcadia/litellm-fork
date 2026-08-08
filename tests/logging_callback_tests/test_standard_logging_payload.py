@@ -186,7 +186,11 @@ def all_fields_present(standard_logging_metadata: StandardLoggingMetadata):
     "metadata_key, metadata_value",
     [
         ("user_api_key_alias", "test_alias"),
-        ("user_api_key_hash", "test_hash"),
+        # `user_api_key_hash` is sanitized, so a generic placeholder would be hashed on
+        # the way through. Use a real sha256, which is what this field actually carries;
+        # the cleartext case is pinned by
+        # test_get_standard_logging_metadata_hashes_cleartext_user_api_key_hash below.
+        ("user_api_key_hash", "b" * 64),
         ("user_api_key_team_id", "test_team_id"),
         ("user_api_key_user_id", "test_user_id"),
         ("user_api_key_team_alias", "test_team_alias"),
@@ -220,6 +224,31 @@ def test_get_standard_logging_metadata_user_api_key_hash():
     metadata = {"user_api_key": valid_hash}
     result = StandardLoggingPayloadSetup.get_standard_logging_metadata(metadata)
     assert result["user_api_key_hash"] == valid_hash
+
+
+def test_get_standard_logging_metadata_hashes_cleartext_user_api_key_hash():
+    """
+    `user_api_key_hash` is blind-copied out of caller metadata by the loop above the
+    `is_valid_sha256_hash` check, and that check is a conditional overwrite rather than a
+    filter - it cannot unset a cleartext value that was already copied in. So an
+    unrecognised credential shape has to be hashed here, or it reaches the logging sinks
+    (S3, GCS, a webhook, ...) verbatim.
+    """
+    import hashlib
+
+    raw = "opaque-oauth2-access-token"
+    result = StandardLoggingPayloadSetup.get_standard_logging_metadata({"user_api_key_hash": raw})
+
+    all_fields_present(result)
+    assert result["user_api_key_hash"] == hashlib.sha256(raw.encode()).hexdigest()
+
+
+def test_get_standard_logging_metadata_preserves_existing_hash_exactly():
+    """Existing hashes are stable join keys - re-hashing would break historical attribution."""
+    existing = "c" * 64
+    result = StandardLoggingPayloadSetup.get_standard_logging_metadata({"user_api_key_hash": existing})
+
+    assert result["user_api_key_hash"] == existing
 
 
 def test_get_standard_logging_metadata_invalid_user_api_key():
