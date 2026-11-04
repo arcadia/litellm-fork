@@ -166,7 +166,10 @@ ci = [
     # protobuf, Pillow is a compiled C extension).
     "tenacity==8.5.0",
     "google-generativeai==0.8.6",
-    "Pillow==12.2.0",
+    # CVE-2026-112900: 13.0.0 is the first fixed release but requires Python >= 3.11.
+    # Python 3.10 (still in requires-python) has no fixed Pillow, so it keeps 12.2.0.
+    "Pillow==13.0.0; python_version >= '3.11'",
+    "Pillow==12.2.0; python_version < '3.11'",
     # Azure batch E2E tests still import psycopg2 directly.
     "psycopg2-binary==2.9.11",
     "pytest-codspeed==4.3.0",
